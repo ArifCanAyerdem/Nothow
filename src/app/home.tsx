@@ -11,10 +11,15 @@ import { useState } from 'react';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { items, isUnlocked } = useVaultStore();
+  const { items, isUnlocked, userName } = useVaultStore();
   const [searchQuery, setSearchQuery] = useState('');
   
-  const tasks = items.filter(item => item.type === 'task');
+  const filteredItems = items.filter(item => 
+    item.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    (item.type !== 'password' && item.content.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  const tasks = filteredItems.filter(item => item.type === 'task');
   const completedTasks = tasks.filter(item => item.isCompleted);
   const totalTasks = tasks.length || 1;
   const completionRate = tasks.length === 0 ? 0 : Math.round((completedTasks.length / totalTasks) * 100);
@@ -55,7 +60,7 @@ export default function HomeScreen() {
         <View style={styles.greetingSection}>
           <View>
             <View style={{flexDirection: 'row', alignItems: 'center'}}>
-              <Text style={styles.greetingTitle}>Günaydın</Text>
+              <Text style={styles.greetingTitle}>Günaydın {userName}</Text>
               <Text style={{fontSize: 24, marginLeft: 4}}>👋</Text>
             </View>
             <Text style={styles.greetingDesc}>
@@ -207,7 +212,7 @@ export default function HomeScreen() {
           </View>
           
           <View style={{gap: 12}}>
-            {items.slice(0, 3).map((item) => (
+            {filteredItems.slice(0, 3).map((item) => (
               <AnimatedCard key={item.id} style={styles.noteCard} onPress={() => router.push(item.type === 'password' ? '/vault' : '/notes')}>
                 <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center'}}>
                   <View style={{flexDirection: 'row', alignItems: 'center'}}>
@@ -248,19 +253,27 @@ export default function HomeScreen() {
               </AnimatedCard>
             ))}
             
-            {items.length === 0 && (
-              <Text style={{color: Colors.light.textSecondary, textAlign: 'center', marginTop: 20}}>Henüz hiçbir şey eklenmemiş.</Text>
+            {filteredItems.length === 0 && (
+              <Text style={{color: Colors.light.textSecondary, textAlign: 'center', marginTop: 20}}>
+                {searchQuery.length > 0 ? 'Sonuç bulunamadı.' : 'Henüz hiçbir şey eklenmemiş.'}
+              </Text>
             )}
           </View>
         </View>
 
         {/* Son Kullanılanlar Hapları */}
         <View style={[styles.section, { paddingBottom: 60 }]}>
-          <Text style={{fontSize: 10, fontWeight: '600', color: Colors.light.textSecondary, letterSpacing: 1, marginBottom: 8}}>SON KULLANILANLAR</Text>
+          <Text style={{fontSize: 10, fontWeight: '600', color: Colors.light.textSecondary, letterSpacing: 1, marginBottom: 8}}>SON EKLENENLER</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap: 8}}>
-            <TouchableOpacity style={styles.pillCard} onPress={() => router.push('/vault')}><Text style={styles.pillIcon}>🔐</Text><Text style={styles.pillText}>Steam hesabı</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.pillCard} onPress={() => router.push('/notes')}><Text style={styles.pillIcon}>💡</Text><Text style={styles.pillText}>Unity Projesi</Text></TouchableOpacity>
-            <TouchableOpacity style={styles.pillCard} onPress={() => router.push('/plan')}><Text style={styles.pillIcon}>📅</Text><Text style={styles.pillText}>KPSS Planı</Text></TouchableOpacity>
+            {items.slice(0, 5).map(item => (
+              <TouchableOpacity key={item.id} style={styles.pillCard} onPress={() => router.push(item.type === 'password' ? '/vault' : '/notes')}>
+                <Text style={styles.pillIcon}>{item.type === 'password' ? '🔐' : item.type === 'note' ? '💡' : '📅'}</Text>
+                <Text style={styles.pillText} numberOfLines={1}>{item.title}</Text>
+              </TouchableOpacity>
+            ))}
+            {items.length === 0 && (
+              <Text style={{fontSize: 12, color: Colors.light.textSecondary, fontStyle: 'italic'}}>Henüz veri yok.</Text>
+            )}
           </ScrollView>
         </View>
 

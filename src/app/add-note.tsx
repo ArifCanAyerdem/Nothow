@@ -1,4 +1,4 @@
-import { StyleSheet, View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, Alert, Animated, Easing } from 'react-native';
+import { StyleSheet, View, Text, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, Alert, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing } from '@/constants/theme';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -7,22 +7,50 @@ import { useVaultStore, VaultItemType } from '@/store/vaultStore';
 import { MaterialIcons } from '@expo/vector-icons';
 import Markdown from 'react-native-markdown-display';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Clipboard from 'expo-clipboard';
+import { useForm, Controller } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+
+// Zod Schema for validation
+const formSchema = z.object({
+  type: z.enum(['note', 'password', 'task']),
+  title: z.string().min(1, 'Başlık boş bırakılamaz'),
+  content: z.string().min(1, 'İçerik boş bırakılamaz'),
+  username: z.string().optional(),
+  scheduledAt: z.date().optional(),
+  recurrence: z.enum(['none', 'daily', 'weekly']).optional()
+});
+
+type FormData = z.infer<typeof formSchema>;
 
 export default function AddNoteScreen() {
   const router = useRouter();
   const { id, defaultType } = useLocalSearchParams<{ id?: string, defaultType?: VaultItemType }>();
   const { items, addItem, updateItem, deleteItem } = useVaultStore();
   
-  const [title, setTitle] = useState('');
-  const [content, setContent] = useState('');
-  const [username, setUsername] = useState('');
-  const [type, setType] = useState<VaultItemType>(defaultType || 'note');
   const [isAiProcessing, setIsAiProcessing] = useState(false);
   const [isPreview, setIsPreview] = useState(false);
-  const [scheduledAt, setScheduledAt] = useState<Date>(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const aiGlowAnim = useRef(new Animated.Value(0)).current;
+
+  const { control, handleSubmit, setValue, watch, reset, formState: { errors } } = useForm<FormData>({
+    resolver: zodResolver(formSchema),
+    defaultValues: {
+      type: defaultType || 'note',
+      title: '',
+      content: '',
+      username: '',
+      scheduledAt: new Date(),
+      recurrence: 'none'
+    }
+  });
+
+  const watchType = watch('type');
+  const watchContent = watch('content');
+  const watchScheduledAt = watch('scheduledAt');
+  const watchRecurrence = watch('recurrence');
 
   useEffect(() => {
     if (isAiProcessing) {
@@ -38,73 +66,88 @@ export default function AddNoteScreen() {
     }
   }, [isAiProcessing]);
 
+  useEffect(() => {
+    if (id) {
+      const existingItem = items.find(item => item.id === id);
+      if (existingItem) {
+        reset({
+          type: existingItem.type,
+          title: existingItem.title,
+          content: existingItem.content,
+          username: existingItem.username || '',
+          scheduledAt: existingItem.scheduledAt ? new Date(existingItem.scheduledAt) : new Date(),
+          recurrence: existingItem.recurrence || 'none'
+        });
+      }
+    } else if (defaultType) {
+      setValue('type', defaultType);
+    }
+  }, [id, defaultType, items, reset, setValue]);
+
   const generatePassword = () => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+';
     let newPassword = '';
     for (let i = 0; i < 16; i++) {
       newPassword += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    setContent(newPassword);
+    setValue('content', newPassword, { shouldValidate: true });
+  };
+
+  const copyToClipboard = async () => {
+    if (watchContent) {
+      const contentToCopy = watchContent;
+      await Clipboard.setStringAsync(contentToCopy);
+      Alert.alert('Kopyalandı', 'İçerik panoya kopyalandı. Güvenliğiniz için 60 saniye sonra otomatik silinecektir.');
+      
+      // Auto-clear clipboard after 60 seconds
+      setTimeout(async () => {
+        const currentContent = await Clipboard.getStringAsync();
+        if (currentContent === contentToCopy) {
+          await Clipboard.setStringAsync('');
+        }
+      }, 60000);
+    } else {
+      Alert.alert('Hata', 'Kopyalanacak bir içerik yok.');
+    }
   };
 
   const transformWithAI = () => {
-    if (!content.trim()) {
+    if (!watchContent?.trim()) {
       Alert.alert('Bilgi', 'Dönüştürmek için önce bir not yazın.');
       return;
     }
     setIsAiProcessing(true);
     setTimeout(() => {
-      const extractedTitle = content.split(' ').slice(0, 3).join(' ') + '... (AI)';
-      setTitle(extractedTitle);
-      setType('task');
-      setContent(`[AI Tarafından Düzenlendi]\n- ${content}`);
+      const extractedTitle = watchContent.split(' ').slice(0, 3).join(' ') + '... (AI)';
+      setValue('title', extractedTitle);
+      setValue('type', 'task');
+      setValue('content', `[AI Tarafından Düzenlendi]\n- ${watchContent}`);
       setIsAiProcessing(false);
       Alert.alert('AI Dönüşümü Başarılı', 'Notunuz düzenli bir göreve dönüştürüldü.');
     }, 1500);
   };
 
-  useEffect(() => {
+  const onSave = async (data: FormData) => {
     if (id) {
-      const existingItem = items.find(item => item.id === id);
-      if (existingItem) {
-        setTitle(existingItem.title);
-        setContent(existingItem.content);
-        setType(existingItem.type);
-        if (existingItem.username) setUsername(existingItem.username);
-        if (existingItem.scheduledAt) {
-          setScheduledAt(new Date(existingItem.scheduledAt));
-        }
-      }
-    } else if (defaultType) {
-      setType(defaultType);
-    }
-  }, [id, defaultType]);
-
-  const handleSave = () => {
-    if (!title.trim() || !content.trim()) {
-      Alert.alert('Eksik Bilgi', 'Lütfen başlık ve içerik girin.');
-      return;
-    }
-    
-    if (id) {
-      updateItem(id, {
-        title: title.trim(),
-        content: content.trim(),
-        username: type === 'password' ? username.trim() : undefined,
-        type,
-        scheduledAt: type === 'task' ? scheduledAt.getTime() : undefined,
+      await updateItem(id, {
+        title: data.title.trim(),
+        content: data.content.trim(),
+        username: data.type === 'password' ? data.username?.trim() : undefined,
+        type: data.type,
+        scheduledAt: data.type === 'task' && data.scheduledAt ? data.scheduledAt.getTime() : undefined,
+        recurrence: data.type === 'task' ? data.recurrence : undefined,
       });
     } else {
-      addItem({
-        type,
-        title: title.trim(),
-        content: content.trim(),
-        username: type === 'password' ? username.trim() : undefined,
+      await addItem({
+        type: data.type,
+        title: data.title.trim(),
+        content: data.content.trim(),
+        username: data.type === 'password' ? data.username?.trim() : undefined,
         isCompleted: false,
-        scheduledAt: type === 'task' ? scheduledAt.getTime() : undefined,
+        scheduledAt: data.type === 'task' && data.scheduledAt ? data.scheduledAt.getTime() : undefined,
+        recurrence: data.type === 'task' ? data.recurrence : undefined,
       });
     }
-
     router.back();
   };
 
@@ -112,8 +155,8 @@ export default function AddNoteScreen() {
     if (!id) return;
     Alert.alert('Emin misin?', 'Bu kaydı tamamen silmek istediğine emin misin?', [
       { text: 'İptal', style: 'cancel' },
-      { text: 'Sil', style: 'destructive', onPress: () => {
-        deleteItem(id);
+      { text: 'Sil', style: 'destructive', onPress: async () => {
+        await deleteItem(id);
         router.back();
       }}
     ]);
@@ -127,113 +170,150 @@ export default function AddNoteScreen() {
             <MaterialIcons name="close" size={24} color={Colors.light.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>{id ? 'Düzenle' : 'Yeni Kayıt'}</Text>
-          <TouchableOpacity onPress={handleSave} style={styles.saveBtn}>
+          <TouchableOpacity onPress={handleSubmit(onSave)} style={styles.saveBtn}>
             <Text style={styles.saveText}>{id ? 'Güncelle' : 'Kaydet'}</Text>
           </TouchableOpacity>
         </View>
 
         <ScrollView contentContainerStyle={styles.form} keyboardShouldPersistTaps="handled">
-          {/* Type Selector (Hide if defaultType is provided) */}
+          {/* Type Selector (Hide if defaultType is provided or if editing) */}
           {!defaultType && !id && (
             <View style={styles.typeSelector}>
               <TouchableOpacity 
-                style={[styles.typeBtn, type === 'task' && styles.typeBtnActive]} 
-                onPress={() => setType('task')}
+                style={[styles.typeBtn, watchType === 'task' && styles.typeBtnActive]} 
+                onPress={() => setValue('type', 'task')}
                 activeOpacity={0.7}
               >
                 <Text style={styles.typeIcon}>✅</Text>
-                <Text style={[styles.typeText, type === 'task' && styles.typeTextActive]}>Görev</Text>
+                <Text style={[styles.typeText, watchType === 'task' && styles.typeTextActive]}>Görev</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
-                style={[styles.typeBtn, type === 'note' && styles.typeBtnActive]} 
-                onPress={() => setType('note')}
+                style={[styles.typeBtn, watchType === 'note' && styles.typeBtnActive]} 
+                onPress={() => setValue('type', 'note')}
                 activeOpacity={0.7}
               >
                 <Text style={styles.typeIcon}>📄</Text>
-                <Text style={[styles.typeText, type === 'note' && styles.typeTextActive]}>Not</Text>
+                <Text style={[styles.typeText, watchType === 'note' && styles.typeTextActive]}>Not</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
-                style={[styles.typeBtn, type === 'password' && styles.typeBtnActive]} 
-                onPress={() => setType('password')}
+                style={[styles.typeBtn, watchType === 'password' && styles.typeBtnActive]} 
+                onPress={() => setValue('type', 'password')}
                 activeOpacity={0.7}
               >
                 <Text style={styles.typeIcon}>🔑</Text>
-                <Text style={[styles.typeText, type === 'password' && styles.typeTextActive]}>Şifre</Text>
+                <Text style={[styles.typeText, watchType === 'password' && styles.typeTextActive]}>Şifre</Text>
               </TouchableOpacity>
             </View>
           )}
 
           <View style={styles.inputContainer}>
-            <TextInput 
-              style={styles.inputTitle}
-              placeholder={type === 'password' ? 'Platform (örn: Steam)' : 'Başlık girin...'}
-              placeholderTextColor={Colors.light.textSecondary}
-              value={title}
-              onChangeText={setTitle}
-              autoFocus
+            <Controller
+              control={control}
+              name="title"
+              render={({ field: { onChange, value } }) => (
+                <TextInput 
+                  style={[styles.inputTitle, errors.title && {color: Colors.light.error}]}
+                  placeholder={watchType === 'password' ? 'Platform (örn: Steam)' : 'Başlık girin...'}
+                  placeholderTextColor={errors.title ? Colors.light.error : Colors.light.textSecondary}
+                  value={value}
+                  onChangeText={onChange}
+                  autoFocus
+                />
+              )}
             />
+            {errors.title && <Text style={styles.errorText}>{errors.title.message}</Text>}
+
             <View style={styles.divider} />
             
-            {type === 'password' && (
+            {watchType === 'password' && (
               <>
-                <TextInput 
-                  style={[styles.inputTitle, { fontSize: 16 }]}
-                  placeholder="Kullanıcı Adı veya E-posta"
-                  placeholderTextColor={Colors.light.textSecondary}
-                  value={username}
-                  onChangeText={setUsername}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
+                <Controller
+                  control={control}
+                  name="username"
+                  render={({ field: { onChange, value } }) => (
+                    <TextInput 
+                      style={[styles.inputTitle, { fontSize: 16 }]}
+                      placeholder="Kullanıcı Adı veya E-posta"
+                      placeholderTextColor={Colors.light.textSecondary}
+                      value={value}
+                      onChangeText={onChange}
+                      autoCapitalize="none"
+                      keyboardType="email-address"
+                    />
+                  )}
                 />
                 <View style={styles.divider} />
               </>
             )}
 
-            {type === 'task' && (
+            {watchType === 'task' && (
               <View style={styles.scheduleContainer}>
                 <Text style={styles.inputLabel}>Zamanlama</Text>
                 <View style={{flexDirection: 'row', gap: 12}}>
                   <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowDatePicker(true)}>
                     <MaterialIcons name="event" size={18} color={Colors.light.primary} />
-                    <Text style={styles.datePickerText}>{scheduledAt.toLocaleDateString()}</Text>
+                    <Text style={styles.datePickerText}>{watchScheduledAt?.toLocaleDateString()}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={styles.datePickerBtn} onPress={() => setShowTimePicker(true)}>
                     <MaterialIcons name="schedule" size={18} color={Colors.light.primary} />
                     <Text style={styles.datePickerText}>
-                      {scheduledAt.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                      {watchScheduledAt?.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                     </Text>
                   </TouchableOpacity>
                 </View>
 
-                {showDatePicker && (
+                {showDatePicker && watchScheduledAt && (
                   <DateTimePicker
-                    value={scheduledAt}
+                    value={watchScheduledAt}
                     mode="date"
                     display="default"
-                    onChange={(event, date) => {
+                    onValueChange={(event, date) => {
                       setShowDatePicker(false);
-                      if (date) setScheduledAt(date);
+                      if (date) setValue('scheduledAt', date);
                     }}
                   />
                 )}
-                {showTimePicker && (
+                {showTimePicker && watchScheduledAt && (
                   <DateTimePicker
-                    value={scheduledAt}
+                    value={watchScheduledAt}
                     mode="time"
                     display="default"
-                    onChange={(event, date) => {
+                    onValueChange={(event, date) => {
                       setShowTimePicker(false);
-                      if (date) setScheduledAt(date);
+                      if (date) setValue('scheduledAt', date);
                     }}
                   />
                 )}
                 <View style={styles.divider} />
+                
+                <Text style={styles.inputLabel}>Tekrarlama</Text>
+                <View style={styles.recurrenceContainer}>
+                  <TouchableOpacity 
+                    style={[styles.recurrenceBtn, watchRecurrence === 'none' && styles.recurrenceBtnActive]} 
+                    onPress={() => setValue('recurrence', 'none')}
+                  >
+                    <Text style={[styles.recurrenceText, watchRecurrence === 'none' && styles.recurrenceTextActive]}>Yok</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.recurrenceBtn, watchRecurrence === 'daily' && styles.recurrenceBtnActive]} 
+                    onPress={() => setValue('recurrence', 'daily')}
+                  >
+                    <Text style={[styles.recurrenceText, watchRecurrence === 'daily' && styles.recurrenceTextActive]}>Günlük</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={[styles.recurrenceBtn, watchRecurrence === 'weekly' && styles.recurrenceBtnActive]} 
+                    onPress={() => setValue('recurrence', 'weekly')}
+                  >
+                    <Text style={[styles.recurrenceText, watchRecurrence === 'weekly' && styles.recurrenceTextActive]}>Haftalık</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.divider} />
               </View>
             )}
 
-            {type === 'note' && (
+            {watchType === 'note' && (
               <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 8}}>
                 <TouchableOpacity onPress={() => setIsPreview(!isPreview)} style={{flexDirection: 'row', alignItems: 'center'}}>
                   <MaterialIcons name={isPreview ? "edit" : "visibility"} size={16} color={Colors.light.primary} />
@@ -244,31 +324,46 @@ export default function AddNoteScreen() {
               </View>
             )}
 
-            {isPreview && type === 'note' ? (
-              <ScrollView style={{minHeight: 200, padding: 8, backgroundColor: 'rgba(255,255,255,0.5)', borderRadius: 12}}>
-                <Markdown>{content || '*Buraya Markdown ile notunuzu yazın...*'}</Markdown>
-              </ScrollView>
-            ) : (
-              <TextInput 
-                style={styles.inputContent}
-                placeholder={type === 'password' ? 'Gizli şifreyi girin...' : type === 'task' ? 'Görev detayları...' : 'Notunuzu (Markdown) yazın...'}
-                placeholderTextColor={Colors.light.textSecondary}
-                value={content}
-                onChangeText={setContent}
-                multiline={type !== 'password'}
-                secureTextEntry={type === 'password'}
-                textAlignVertical={type === 'password' ? "center" : "top"}
-              />
+            <Controller
+              control={control}
+              name="content"
+              render={({ field: { onChange, value } }) => (
+                <>
+                  {isPreview && watchType === 'note' ? (
+                    <ScrollView style={{minHeight: 200, padding: 8, backgroundColor: 'rgba(255,255,255,0.5)', borderRadius: 12}}>
+                      <Markdown>{value || '*Buraya Markdown ile notunuzu yazın...*'}</Markdown>
+                    </ScrollView>
+                  ) : (
+                    <TextInput 
+                      style={[styles.inputContent, errors.content && {color: Colors.light.error}]}
+                      placeholder={watchType === 'password' ? 'Gizli şifreyi girin...' : watchType === 'task' ? 'Görev detayları...' : 'Notunuzu (Markdown) yazın...'}
+                      placeholderTextColor={errors.content ? Colors.light.error : Colors.light.textSecondary}
+                      value={value}
+                      onChangeText={onChange}
+                      multiline={watchType !== 'password'}
+                      secureTextEntry={watchType === 'password'}
+                      textAlignVertical={watchType === 'password' ? "center" : "top"}
+                    />
+                  )}
+                  {errors.content && <Text style={styles.errorText}>{errors.content.message}</Text>}
+                </>
+              )}
+            />
+
+            {watchType === 'password' && (
+              <View style={{flexDirection: 'row', gap: 12, marginTop: 16}}>
+                <TouchableOpacity style={[styles.actionBtn, {flex: 1, marginTop: 0}]} onPress={generatePassword} activeOpacity={0.7}>
+                  <MaterialIcons name="casino" size={18} color={Colors.light.primary} />
+                  <Text style={styles.actionBtnText}>Güçlü Üret</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.actionBtn, {flex: 1, marginTop: 0}]} onPress={copyToClipboard} activeOpacity={0.7}>
+                  <MaterialIcons name="content-copy" size={18} color={Colors.light.primary} />
+                  <Text style={styles.actionBtnText}>Kopyala</Text>
+                </TouchableOpacity>
+              </View>
             )}
 
-            {type === 'password' && (
-              <TouchableOpacity style={styles.actionBtn} onPress={generatePassword} activeOpacity={0.7}>
-                <MaterialIcons name="casino" size={18} color={Colors.light.primary} />
-                <Text style={styles.actionBtnText}>Güvenli Şifre Üret</Text>
-              </TouchableOpacity>
-            )}
-
-            {type === 'note' && (
+            {watchType === 'note' && (
               <Animated.View style={[
                 styles.actionBtn, 
                 { 
@@ -290,7 +385,7 @@ export default function AddNoteScreen() {
             )}
           </View>
 
-          {/* Delete Button (Only visible when editing) */}
+          {/* Delete Button */}
           {id && (
             <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete} activeOpacity={0.7}>
               <MaterialIcons name="delete-outline" size={20} color={Colors.light.error} />
@@ -391,12 +486,13 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: Colors.light.text,
-    marginBottom: 16,
+    marginBottom: 8,
   },
   divider: {
     height: 1,
     backgroundColor: Colors.light.border,
     marginBottom: 16,
+    marginTop: 8,
   },
   inputContent: {
     flex: 1,
@@ -404,6 +500,12 @@ const styles = StyleSheet.create({
     color: Colors.light.text,
     lineHeight: 24,
     minHeight: 150,
+  },
+  errorText: {
+    color: Colors.light.error,
+    fontSize: 12,
+    marginTop: -4,
+    marginBottom: 8,
   },
   deleteBtn: {
     flexDirection: 'row',
@@ -462,5 +564,31 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     color: Colors.light.text,
+  },
+  recurrenceContainer: {
+    flexDirection: 'row',
+    backgroundColor: Colors.light.surfaceContainerLowest,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.light.border,
+    marginBottom: 8,
+  },
+  recurrenceBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+  },
+  recurrenceBtnActive: {
+    backgroundColor: Colors.light.primary,
+  },
+  recurrenceText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.light.textSecondary,
+  },
+  recurrenceTextActive: {
+    color: '#fff',
   }
 });

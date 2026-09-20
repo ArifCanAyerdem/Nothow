@@ -8,18 +8,20 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { BlurView } from 'expo-blur';
 import { Animated, Easing } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { MaterialIcons } from '@expo/vector-icons';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { unlockVault } = useVaultStore();
+  const { unlockVault, unlockWithBiometrics, initStore, isBiometricsEnabled, userPin, userName } = useVaultStore();
   const [password, setPassword] = useState('');
   const [isBiometricSupported, setIsBiometricSupported] = useState(false);
-  const [useBiometrics, setUseBiometrics] = useState(true);
   const pulseAnim = useState(new Animated.Value(1))[0];
   const [authStatus, setAuthStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
     (async () => {
+      await initStore();
       const compatible = await LocalAuthentication.hasHardwareAsync();
       setIsBiometricSupported(compatible);
     })();
@@ -28,14 +30,14 @@ export default function LoginScreen() {
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
-          toValue: 1.2,
-          duration: 1000,
+          toValue: 1.15,
+          duration: 1200,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
         Animated.timing(pulseAnim, {
           toValue: 1,
-          duration: 1000,
+          duration: 1200,
           easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         })
@@ -49,13 +51,13 @@ export default function LoginScreen() {
       if (unlockVault(password)) {
         router.replace('/home');
       } else {
-        Alert.alert('Erişim Reddedildi', 'Hatalı ana şifre. (İpucu: 1234)');
+        Alert.alert('Erişim Reddedildi', 'Hatalı ana şifre.');
       }
       return;
     }
 
     // Try Biometrics if supported and enabled
-    if (useBiometrics && isBiometricSupported) {
+    if (isBiometricsEnabled && isBiometricSupported) {
       const auth = await LocalAuthentication.authenticateAsync({
         promptMessage: 'Kasa kilidini aç',
         fallbackLabel: 'Şifre Kullan',
@@ -65,7 +67,7 @@ export default function LoginScreen() {
         setAuthStatus('success');
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setTimeout(() => {
-          unlockVault('1234');
+          unlockWithBiometrics();
           router.replace('/home');
         }, 800);
       } else {
@@ -90,50 +92,51 @@ export default function LoginScreen() {
           showsVerticalScrollIndicator={false}
           bounces={false}
         >
-          {/* Decorative Background Elements for Glassmorphism */}
-          <View style={[styles.bgGlow, { top: -50, left: -50, backgroundColor: 'rgba(255, 107, 0, 0.15)' }]} />
-          <View style={[styles.bgGlow, { bottom: 100, right: -100, backgroundColor: 'rgba(0, 150, 255, 0.1)' }]} />
+          {/* Decorative Background Elements */}
+          <View style={[styles.bgGlow, { top: -50, left: -50, backgroundColor: 'rgba(255, 107, 0, 0.08)' }]} />
+          <View style={[styles.bgGlow, { bottom: 100, right: -100, backgroundColor: 'rgba(0, 150, 255, 0.05)' }]} />
 
           {/* Top Section */}
           <View style={styles.topSection}>
+            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+              <MaterialIcons name="arrow-back" size={24} color={Colors.light.text} />
+            </TouchableOpacity>
+
             <View style={styles.logoBadgeContainer}>
-              <View style={styles.shieldIcon} />
-              <Text style={styles.secureBadge}>AES-256 ŞİFRELİ</Text>
+              <View style={styles.shieldIcon}>
+                <MaterialIcons name="security" size={14} color="#fff" />
+              </View>
+              <Text style={styles.brandTitle}>NOTHOW HUB</Text>
             </View>
-            <Text style={styles.brandTitle}>NOTHOW HUB</Text>
             
             <Text style={styles.headline}>Kasanıza Erişin</Text>
             <Text style={styles.subHeadline}>
-              Sıfır bilgi mimarisi ile korunan güvenli alanınıza girmek için kimliğinizi doğrulayın.
+              Hoş geldin{userName ? `, ${userName}` : ''}. Güvenli alanına girmek için kimliğini doğrula.
             </Text>
           </View>
 
           {/* Form Fields wrapped in BlurView */}
           <BlurView intensity={40} tint="light" style={styles.formSection}>
-            <View style={styles.inputContainer}>
-              <Text style={styles.inputLabel}>Kasa Kimliği</Text>
-              <TextInput 
-                style={styles.input} 
-                placeholder="isim@vault.com" 
-                placeholderTextColor={Colors.light.textSecondary}
-                autoCapitalize="none"
-                keyboardType="email-address"
-              />
-            </View>
-
-            <View style={styles.inputContainer}>
+            <View style={styles.inputGroup}>
               <View style={styles.passwordHeader}>
-                <Text style={styles.inputLabel}>Ana Şifre</Text>
-                <Pressable><Text style={styles.forgotText}>Şifremi Unuttum?</Text></Pressable>
+                <Text style={styles.label}>Ana Şifre (PIN)</Text>
               </View>
-              <TextInput 
-                style={styles.input} 
-                placeholder="••••••••••••" 
-                placeholderTextColor={Colors.light.textSecondary}
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-              />
+              <View style={styles.inputContainer}>
+                <MaterialIcons name="lock-outline" size={20} color={Colors.light.textSecondary} style={styles.inputIcon} />
+                <TextInput 
+                  style={styles.input} 
+                  placeholder="••••••••••••" 
+                  placeholderTextColor={Colors.light.textSecondary}
+                  secureTextEntry={!showPassword}
+                  value={password}
+                  onChangeText={setPassword}
+                  keyboardType="number-pad"
+                  selectionColor={Colors.light.primary}
+                />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
+                  <MaterialIcons name={showPassword ? "visibility" : "visibility-off"} size={20} color={Colors.light.textSecondary} />
+                </TouchableOpacity>
+              </View>
             </View>
 
             {isBiometricSupported && (
@@ -149,7 +152,13 @@ export default function LoginScreen() {
                   authStatus === 'success' && { backgroundColor: Colors.light.success },
                   authStatus === 'error' && { backgroundColor: Colors.light.error }
                 ]} onPress={handleLogin}>
-                  <Text style={{fontSize: 24}}>{authStatus === 'success' ? '✅' : authStatus === 'error' ? '❌' : '👆'}</Text>
+                  {authStatus === 'success' ? (
+                    <MaterialIcons name="check" size={28} color="#fff" />
+                  ) : authStatus === 'error' ? (
+                    <MaterialIcons name="close" size={28} color="#fff" />
+                  ) : (
+                    <MaterialIcons name="fingerprint" size={32} color={Colors.light.primary} />
+                  )}
                 </TouchableOpacity>
               </View>
             )}
@@ -162,30 +171,13 @@ export default function LoginScreen() {
             )}
           </BlurView>
 
-          {/* Social SSO */}
-          <View style={styles.ssoSection}>
-            <View style={styles.dividerContainer}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>Or continue with</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            <Pressable style={styles.ssoButtonApple}>
-              <Text style={styles.ssoButtonTextApple}>Continue with Apple</Text>
-            </Pressable>
-            <Pressable style={styles.ssoButtonGoogle}>
-              <Text style={styles.ssoButtonTextGoogle}>Continue with Google</Text>
-            </Pressable>
-          </View>
-
           {/* Footer */}
           <View style={styles.footerSection}>
             <View style={styles.createAccountContainer}>
-              <Text style={styles.footerText}>Don't have a vault account? </Text>
-              <Pressable><Text style={styles.createAccountText}>Create an Account</Text></Pressable>
-            </View>
-            <View style={styles.trustBadge}>
-              <Text style={styles.trustBadgeText}>🛡️ Protected by Hardware Enclave & Zero-Knowledge Architecture</Text>
+              <Text style={styles.footerText}>Kasanız yok mu? </Text>
+              <Pressable onPress={() => router.replace('/register')}>
+                <Text style={styles.createAccountText}>Yeni Kasa Oluştur</Text>
+              </Pressable>
             </View>
           </View>
         </ScrollView>
@@ -205,7 +197,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.six,
+    paddingTop: Spacing.four,
     paddingBottom: Spacing.six,
   },
   bgGlow: {
@@ -217,6 +209,14 @@ const styles = StyleSheet.create({
   topSection: {
     marginBottom: Spacing.five,
   },
+  backButton: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+    marginLeft: -8,
+  },
   logoBadgeContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -224,76 +224,83 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   shieldIcon: {
-    width: 20,
-    height: 20,
+    width: 24,
+    height: 24,
     backgroundColor: Colors.light.primary,
-    borderRadius: 4,
-  },
-  secureBadge: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: Colors.light.success,
-    letterSpacing: 0.5,
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   brandTitle: {
     fontSize: 16,
     fontWeight: '700',
     color: Colors.light.textSecondary,
-    marginBottom: 24,
   },
   headline: {
     fontSize: 32,
-    fontWeight: '700',
+    fontWeight: '800',
     color: Colors.light.text,
     marginBottom: 8,
+    letterSpacing: -0.5,
   },
   subHeadline: {
-    fontSize: 16,
+    fontSize: 15,
     color: Colors.light.textSecondary,
     lineHeight: 24,
   },
   formSection: {
     gap: Spacing.four,
     marginBottom: Spacing.five,
-    backgroundColor: 'rgba(255,255,255,0.7)',
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
     borderRadius: 24,
     padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.5)',
+    borderColor: 'rgba(255, 255, 255, 0.5)',
     overflow: 'hidden',
   },
-  inputContainer: {
+  inputGroup: {
     gap: 8,
   },
-  inputLabel: {
-    fontSize: 14,
+  label: {
+    fontSize: 13,
     fontWeight: '600',
-    color: Colors.light.text,
+    color: Colors.light.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginLeft: 4,
   },
   passwordHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 4,
   },
-  forgotText: {
-    fontSize: 14,
-    color: Colors.light.primary,
-    fontWeight: '600',
-  },
-  input: {
-    backgroundColor: Colors.light.backgroundElement,
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.light.surfaceContainerLowest,
     borderWidth: 1,
     borderColor: Colors.light.border,
-    borderRadius: 12,
+    borderRadius: 16,
+    height: 56,
     paddingHorizontal: 16,
-    paddingVertical: 14,
+  },
+  inputIcon: {
+    marginRight: 12,
+  },
+  input: {
+    flex: 1,
     fontSize: 16,
     color: Colors.light.text,
+    height: '100%',
+  },
+  eyeIcon: {
+    padding: 8,
   },
   biometricPulseWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginVertical: 20,
+    marginVertical: 12,
     height: 100,
   },
   pulseRing: {
@@ -301,76 +308,42 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: 'rgba(255, 107, 0, 0.4)',
   },
   biometricBtnInner: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: Colors.light.surfaceContainer,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: Colors.light.surfaceContainerLowest,
+    borderWidth: 1,
+    borderColor: Colors.light.border,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: Colors.light.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 4,
   },
   signInButton: {
+    flexDirection: 'row',
     backgroundColor: Colors.light.primary,
-    paddingVertical: 16,
-    borderRadius: 12,
+    height: 56,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 8,
+    shadowColor: Colors.light.primary,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
   },
   signInText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
-  },
-  ssoSection: {
-    gap: 16,
-    marginBottom: Spacing.five,
-  },
-  dividerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-    marginBottom: 8,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: Colors.light.border,
-  },
-  dividerText: {
-    color: Colors.light.textSecondary,
-    fontSize: 14,
-  },
-  ssoButtonApple: {
-    backgroundColor: Colors.light.text,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  ssoButtonTextApple: {
-    color: Colors.light.background,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  ssoButtonGoogle: {
-    backgroundColor: Colors.light.backgroundElement,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  ssoButtonTextGoogle: {
-    color: Colors.light.text,
-    fontSize: 16,
-    fontWeight: '600',
   },
   footerSection: {
     marginTop: 'auto',
@@ -379,6 +352,7 @@ const styles = StyleSheet.create({
   },
   createAccountContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
   },
   footerText: {
     color: Colors.light.textSecondary,
@@ -388,20 +362,5 @@ const styles = StyleSheet.create({
     color: Colors.light.primary,
     fontSize: 14,
     fontWeight: '700',
-  },
-  trustBadge: {
-    backgroundColor: Colors.light.backgroundElement,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: Colors.light.border,
-    alignItems: 'center',
-  },
-  trustBadgeText: {
-    fontSize: 10,
-    color: Colors.light.textSecondary,
-    fontWeight: '600',
-    textAlign: 'center',
   },
 });

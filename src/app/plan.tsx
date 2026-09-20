@@ -1,20 +1,25 @@
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors, Spacing } from '@/constants/theme';
 import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { BottomTabBar } from '@/components/BottomTabBar';
-import { useVaultStore } from '@/store/vaultStore';
+import { useVaultStore, VaultItem } from '@/store/vaultStore';
 import { AnimatedCard } from '@/components/AnimatedCard';
+import { FlashList } from '@shopify/flash-list';
+import { useMemo } from 'react';
 
 export default function PlanScreen() {
   const router = useRouter();
-  const { items, updateItem } = useVaultStore();
-  const tasks = items.filter(i => i.type === 'task').sort((a, b) => {
-    const timeA = a.scheduledAt || a.createdAt;
-    const timeB = b.scheduledAt || b.createdAt;
-    return timeA - timeB; // Sort ascending (chronological)
-  });
+  const { items, updateItem, userName } = useVaultStore();
+  
+  const tasks = useMemo(() => {
+    return items.filter(i => i.type === 'task').sort((a, b) => {
+      const timeA = a.scheduledAt || a.createdAt;
+      const timeB = b.scheduledAt || b.createdAt;
+      return timeA - timeB;
+    });
+  }, [items]);
   
   const completedTasks = tasks.filter(t => t.isCompleted).length;
   const totalTasks = tasks.length;
@@ -22,17 +27,116 @@ export default function PlanScreen() {
 
   const formatTaskTime = (timestamp: number) => {
     const date = new Date(timestamp);
-    const today = new Date();
-    const isToday = date.getDate() === today.getDate() && date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
     const timeStr = date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-    
-    if (isToday) return `Bugün ${timeStr}`;
     return `${date.toLocaleDateString()} ${timeStr}`;
   };
 
+  const getRecurrenceBadge = (recurrence?: string) => {
+    if (!recurrence || recurrence === 'none') return null;
+    return (
+      <View style={[styles.recurrenceBadge, recurrence === 'daily' ? styles.badgeDaily : styles.badgeWeekly]}>
+        <MaterialIcons name="loop" size={10} color="#fff" />
+        <Text style={styles.recurrenceBadgeText}>{recurrence === 'daily' ? 'Günlük' : 'Haftalık'}</Text>
+      </View>
+    );
+  };
+
+  // Flattened data for FlashList
+  const flattenedData = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const endOfToday = startOfToday + 24 * 60 * 60 * 1000 - 1;
+
+    const overdueTasks = tasks.filter(t => !t.isCompleted && (t.scheduledAt || t.createdAt) < startOfToday);
+    const todayTasks = tasks.filter(t => {
+      const time = t.scheduledAt || t.createdAt;
+      return time >= startOfToday && time <= endOfToday;
+    });
+    const upcomingTasks = tasks.filter(t => (t.scheduledAt || t.createdAt) > endOfToday);
+
+    const data: any[] = [];
+    if (overdueTasks.length > 0) {
+      data.push({ type: 'header', title: '🔴 Gecikenler', isOverdue: true });
+      overdueTasks.forEach(t => data.push({ type: 'task', task: t, isOverdue: true }));
+    }
+    if (todayTasks.length > 0) {
+      data.push({ type: 'header', title: '📌 Bugün', isOverdue: false });
+      todayTasks.forEach(t => data.push({ type: 'task', task: t, isOverdue: false }));
+    }
+    if (upcomingTasks.length > 0) {
+      data.push({ type: 'header', title: '📅 Yaklaşanlar', isOverdue: false });
+      upcomingTasks.forEach(t => data.push({ type: 'task', task: t, isOverdue: false }));
+    }
+    return data;
+  }, [tasks]);
+
+  const renderItem = ({ item, index = 0 }: { item: any, index?: number }) => {
+    if (item.type === 'header') {
+      return <Text style={[styles.sectionTitle, item.isOverdue && { color: Colors.light.error }]}>{item.title}</Text>;
+    }
+    
+    const task: VaultItem = item.task;
+    const isOverdue = item.isOverdue;
+
+    return (
+      <View>
+        <View style={styles.timelineRow}>
+          <View style={styles.timelineRailContainer}>
+            <View style={[styles.timelineDot, isOverdue && { backgroundColor: Colors.light.error }]} />
+            <View style={styles.timelineRail} />
+          </View>
+
+        <AnimatedCard 
+          style={[
+            styles.taskItem, 
+            task.isCompleted && styles.taskCompleted,
+            isOverdue && !task.isCompleted && { borderColor: 'rgba(186, 26, 26, 0.3)' }
+          ]}
+          onPress={() => updateItem(task.id, { isCompleted: !task.isCompleted })}
+        >
+          <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
+            <View style={[styles.checkbox, task.isCompleted && styles.checkboxActive, isOverdue && !task.isCompleted && { borderColor: Colors.light.error }]}>
+              {task.isCompleted && <MaterialIcons name="check" size={16} color="#fff" />}
+            </View>
+            <View style={{marginLeft: 12, flex: 1}}>
+              <Text style={[styles.taskTitle, task.isCompleted && styles.taskTitleCompleted]} numberOfLines={1}>
+                {task.title}
+              </Text>
+              <Text style={styles.taskDesc} numberOfLines={1}>{task.content}</Text>
+              {getRecurrenceBadge(task.recurrence)}
+            </View>
+          </View>
+          <View style={{alignItems: 'flex-end'}}>
+            <Text style={[styles.taskTime, isOverdue && !task.isCompleted && { color: Colors.light.error }]}>
+              {formatTaskTime(task.scheduledAt || task.createdAt)}
+            </Text>
+            <TouchableOpacity 
+              onPress={() => router.push({ pathname: '/add-note', params: { id: task.id, defaultType: task.type } })}
+              style={{marginTop: 8, padding: 4}}
+              hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
+            >
+              <MaterialIcons name="edit" size={18} color={Colors.light.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </AnimatedCard>
+        </View>
+      </View>
+    );
+  };
+
+  const ListHeader = () => (
+    <View style={styles.planOverview}>
+      <Text style={styles.overviewTitle}>Genel İlerleme</Text>
+      <View style={styles.progressBarBg}>
+        <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
+      </View>
+      <Text style={styles.overviewDesc}>{completedTasks} / {totalTasks} Görev Tamamlandı</Text>
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      {/* App Header (Consistent with Home) */}
+      {/* App Header */}
       <View style={styles.topHeader}>
         <View style={styles.headerLeft}>
           <Text style={styles.headerLogoIcon}>📅</Text>
@@ -47,70 +151,29 @@ export default function PlanScreen() {
           </TouchableOpacity>
           <TouchableOpacity style={styles.profileButton} onPress={() => router.push('/profile')}>
             <View style={styles.profileAvatar}>
-              <Text style={{color: '#fff', fontSize: 12, fontWeight: '700'}}>A</Text>
+              <Text style={{color: '#fff', fontSize: 12, fontWeight: '700'}}>{userName ? userName.charAt(0).toUpperCase() : 'A'}</Text>
             </View>
           </TouchableOpacity>
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Plan Header */}
-        <View style={styles.planOverview}>
-          <Text style={styles.overviewTitle}>Günlük İlerleme</Text>
-          <View style={styles.progressBarBg}>
-            <View style={[styles.progressBarFill, { width: `${progress}%` }]} />
-          </View>
-          <Text style={styles.overviewDesc}>{completedTasks} / {totalTasks} Görev Tamamlandı</Text>
-        </View>
-
-        <View style={styles.timelineContainer}>
-          {tasks.map((task, index) => (
-            <View key={task.id} style={styles.timelineRow}>
-              {/* Timeline Rail & Dot */}
-              <View style={styles.timelineRailContainer}>
-                <View style={styles.timelineDot} />
-                {index !== tasks.length - 1 && <View style={styles.timelineRail} />}
-              </View>
-
-              <AnimatedCard 
-                style={[styles.taskItem, task.isCompleted && styles.taskCompleted]}
-                onPress={() => updateItem(task.id, { isCompleted: !task.isCompleted })}
-              >
-            <View style={{flexDirection: 'row', alignItems: 'center', flex: 1}}>
-              <View style={[styles.checkbox, task.isCompleted && styles.checkboxActive]}>
-                {task.isCompleted && <MaterialIcons name="check" size={16} color="#fff" />}
-              </View>
-              <View style={{marginLeft: 12, flex: 1}}>
-                <Text style={[styles.taskTitle, task.isCompleted && styles.taskTitleCompleted]} numberOfLines={1}>
-                  {task.title}
-                </Text>
-                <Text style={styles.taskDesc} numberOfLines={1}>{task.content}</Text>
-              </View>
+      <View style={{ flex: 1, paddingHorizontal: Spacing.three }}>
+        <FlashList
+          data={flattenedData}
+          renderItem={renderItem}
+          // @ts-ignore: type definition bug in FlashList
+          estimatedItemSize={100}
+          getItemType={(item) => item.type}
+          contentContainerStyle={{ paddingTop: 16, paddingBottom: 120 }}
+          ListHeaderComponent={ListHeader}
+          ListEmptyComponent={() => (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateTitle}>Harika!</Text>
+              <Text style={styles.emptyStateDesc}>Şu an için planlanmış hiçbir görevin yok. Yeni bir görev ekleyerek başlayabilirsin.</Text>
             </View>
-            <View style={{alignItems: 'flex-end'}}>
-              <Text style={styles.taskTime}>
-                {formatTaskTime(task.scheduledAt || task.createdAt)}
-              </Text>
-              <TouchableOpacity 
-                onPress={() => router.push({ pathname: '/add-note', params: { id: task.id, defaultType: task.type } })}
-                style={{marginTop: 8, padding: 4}}
-                hitSlop={{top: 10, bottom: 10, left: 10, right: 10}}
-              >
-                <MaterialIcons name="edit" size={18} color={Colors.light.textSecondary} />
-              </TouchableOpacity>
-            </View>
-          </AnimatedCard>
-        </View>
-      ))}
-    </View>
-
-        {tasks.length === 0 && (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateTitle}>Harika!</Text>
-            <Text style={styles.emptyStateDesc}>Bugün için hiçbir görevin kalmadı veya hiç görev eklemedin.</Text>
-          </View>
-        )}
-      </ScrollView>
+          )}
+        />
+      </View>
 
       {/* Floating Action Button */}
       <View style={styles.fabWrapper}>
@@ -123,7 +186,7 @@ export default function PlanScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Bottom Tab Bar via Component */}
+      {/* Bottom Tab Bar */}
       <BottomTabBar activeRoute="plan" />
     </SafeAreaView>
   );
@@ -194,11 +257,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  scrollContent: {
-    paddingHorizontal: Spacing.three,
-    paddingTop: 16,
-    paddingBottom: 120, // Space for bottom tab bar
-  },
   emptyState: {
     backgroundColor: Colors.light.surfaceContainerLowest,
     padding: 32,
@@ -219,6 +277,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.light.textSecondary,
     textAlign: 'center',
+    lineHeight: 22,
   },
   planOverview: {
     backgroundColor: Colors.light.surfaceContainerLowest,
@@ -250,8 +309,13 @@ const styles = StyleSheet.create({
     color: Colors.light.textSecondary,
     textAlign: 'right',
   },
-  timelineContainer: {
-    paddingLeft: 4,
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: Colors.light.text,
+    marginBottom: 16,
+    marginLeft: 32,
+    marginTop: 16,
   },
   timelineRow: {
     flexDirection: 'row',
@@ -267,7 +331,7 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
     backgroundColor: Colors.light.primary,
-    marginTop: 24, // Align with the card center
+    marginTop: 24,
   },
   timelineRail: {
     width: 2,
@@ -282,7 +346,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.surfaceContainerLowest,
     padding: 16,
     borderRadius: 16,
-    marginBottom: 12,
+    marginBottom: 4,
     borderWidth: 1,
     borderColor: Colors.light.border,
   },
@@ -320,6 +384,28 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: Colors.light.textSecondary,
     marginLeft: 8,
+  },
+  recurrenceBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginTop: 6,
+    gap: 4,
+  },
+  badgeDaily: {
+    backgroundColor: Colors.light.primary,
+  },
+  badgeWeekly: {
+    backgroundColor: '#9c27b0', // purple
+  },
+  recurrenceBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#fff',
+    textTransform: 'uppercase',
   },
   fabWrapper: {
     position: 'absolute',

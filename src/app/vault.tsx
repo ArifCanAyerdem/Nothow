@@ -1,4 +1,4 @@
-import { StyleSheet, View, Text, TouchableOpacity, ScrollView, Alert, TextInput } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Alert, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useVaultStore } from '@/store/vaultStore';
@@ -9,8 +9,9 @@ import { useState } from 'react';
 import * as Clipboard from 'expo-clipboard';
 import { VaultItem } from '@/store/vaultStore';
 import { AnimatedCard } from '@/components/AnimatedCard';
+import { FlashList } from '@shopify/flash-list';
 
-function VaultItemCard({ item }: { item: VaultItem }) {
+function VaultItemCard({ item, index = 0 }: { item: VaultItem; index?: number }) {
   const router = useRouter();
   const [isRevealed, setIsRevealed] = useState(false);
   const isPassword = item.type === 'password';
@@ -22,7 +23,15 @@ function VaultItemCard({ item }: { item: VaultItem }) {
         setTimeout(() => setIsRevealed(false), 5000); // Hide after 5 seconds
       } else {
         await Clipboard.setStringAsync(item.content);
-        Alert.alert('Kopyalandı!', 'Şifre panoya kopyalandı.');
+        Alert.alert('Kopyalandı!', 'Şifre panoya kopyalandı. Güvenliğiniz için 60 saniye sonra otomatik silinecektir.');
+        
+        // Auto-clear clipboard after 60 seconds
+        setTimeout(async () => {
+          const currentContent = await Clipboard.getStringAsync();
+          if (currentContent === item.content) {
+            await Clipboard.setStringAsync('');
+          }
+        }, 60000);
       }
     } else {
       // It's a note or task, maybe navigate to detail or expand (leaving basic for now)
@@ -31,10 +40,11 @@ function VaultItemCard({ item }: { item: VaultItem }) {
   };
 
   return (
-    <AnimatedCard 
-      style={styles.vaultItem} 
-      onPress={handlePress}
-    >
+    <View>
+      <AnimatedCard 
+        style={styles.vaultItem} 
+        onPress={handlePress}
+      >
       <Text style={styles.itemIcon}>{isPassword ? '🔑' : item.type === 'note' ? '📄' : '✅'}</Text>
       <View style={styles.itemContent}>
         <Text style={styles.itemTitle}>{item.title}</Text>
@@ -63,6 +73,7 @@ function VaultItemCard({ item }: { item: VaultItem }) {
         <MaterialIcons name="edit" size={20} color={Colors.light.textSecondary} />
       </TouchableOpacity>
     </AnimatedCard>
+    </View>
   );
 }
 
@@ -100,41 +111,45 @@ export default function VaultScreen() {
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        {/* Search Bar */}
-        <View style={styles.searchContainer}>
-          <MaterialIcons name="search" size={20} color={Colors.light.textSecondary} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Kayıtlarda ara..."
-            placeholderTextColor={Colors.light.textSecondary}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <MaterialIcons name="close" size={20} color={Colors.light.textSecondary} />
-            </TouchableOpacity>
+      <View style={{ flex: 1, paddingHorizontal: Spacing.three }}>
+        <FlashList
+          data={filteredItems}
+          // @ts-ignore: type definition bug in FlashList
+          estimatedItemSize={80}
+          contentContainerStyle={{ paddingTop: 16, paddingBottom: 120 }}
+          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+          ListEmptyComponent={() => (
+            <Text style={{textAlign: 'center', color: Colors.light.textSecondary, marginTop: 40}}>
+              {searchQuery ? 'Sonuç bulunamadı.' : 'Kasa şu an boş.'}
+            </Text>
           )}
-        </View>
+          ListHeaderComponent={() => (
+            <>
+              {/* Search Bar */}
+              <View style={styles.searchContainer}>
+                <MaterialIcons name="search" size={20} color={Colors.light.textSecondary} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Kayıtlarda ara..."
+                  placeholderTextColor={Colors.light.textSecondary}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity onPress={() => setSearchQuery('')}>
+                    <MaterialIcons name="close" size={20} color={Colors.light.textSecondary} />
+                  </TouchableOpacity>
+                )}
+              </View>
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{filteredItems.length} Güvenli Kayıt</Text>
-          </View>
-          
-          <View style={{gap: 12}}>
-            {filteredItems.map((item) => (
-              <VaultItemCard key={item.id} item={item} />
-            ))}
-            {filteredItems.length === 0 && (
-              <Text style={{textAlign: 'center', color: Colors.light.textSecondary, marginTop: 40}}>
-                {searchQuery ? 'Sonuç bulunamadı.' : 'Kasa şu an boş.'}
-              </Text>
-            )}
-          </View>
-        </View>
-      </ScrollView>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>{filteredItems.length} Güvenli Kayıt</Text>
+              </View>
+            </>
+          )}
+          renderItem={({ item, index }) => <VaultItemCard item={item} index={index} />}
+        />
+      </View>
 
       {/* Floating Action Button */}
       <View style={styles.fabWrapper}>

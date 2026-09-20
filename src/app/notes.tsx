@@ -7,6 +7,7 @@ import { useVaultStore } from '@/store/vaultStore';
 import { MaterialIcons } from '@expo/vector-icons';
 import { BottomTabBar } from '@/components/BottomTabBar';
 import { AnimatedCard } from '@/components/AnimatedCard';
+import Markdown from 'react-native-markdown-display';
 
 export default function NotesScreen() {
   const router = useRouter();
@@ -85,9 +86,11 @@ export default function NotesScreen() {
                     {new Date(item.createdAt).toLocaleDateString()}
                   </Text>
                 </View>
-                <Text style={{fontSize: 13, color: Colors.light.textSecondary, marginTop: 8}}>
-                  {item.content}
-                </Text>
+                <View style={{marginTop: 8, maxHeight: 80, overflow: 'hidden'}}>
+                  <Markdown style={markdownStyles}>
+                    {item.content}
+                  </Markdown>
+                </View>
                 <View style={styles.noteFooter}>
                   <View style={{flexDirection: 'row', gap: 6}}>
                     <View style={styles.noteTag}><Text style={styles.noteTagText}>#{item.type}</Text></View>
@@ -127,6 +130,20 @@ export default function NotesScreen() {
     </SafeAreaView>
   );
 }
+
+const markdownStyles = {
+  body: {
+    color: Colors.light.textSecondary,
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  heading1: { fontSize: 16, fontWeight: '700' as const, color: Colors.light.text },
+  heading2: { fontSize: 15, fontWeight: '600' as const, color: Colors.light.text },
+  heading3: { fontSize: 14, fontWeight: '600' as const, color: Colors.light.text },
+  strong: { fontWeight: '700' as const, color: Colors.light.text },
+  em: { fontStyle: 'italic' as const },
+  list_item: { marginBottom: 4 },
+};
 
 const styles = StyleSheet.create({
   container: {
